@@ -167,6 +167,7 @@ footer{text-align:center;padding:24px 16px;font-size:12px;color:#CCC}
 
 <!-- VOTED BANNER -->
 <div id="voted-banner">✅ โหวตแล้ว! ขอบคุณที่ร่วมตัดสินใจครับ 🙌</div>
+<div id="err-banner" style="display:none;margin:14px 16px 0;border-radius:16px;padding:14px 18px;background:#F8D7DA;color:#721C24;font-weight:600;font-size:13px;text-align:center;line-height:1.5"></div>
 
 <!-- NAME INPUT -->
 <div class="name-section" id="name-section">
@@ -300,6 +301,7 @@ footer{text-align:center;padding:24px 16px;font-size:12px;color:#CCC}
   <div class="results-header">
     <h2>🗳️ คะแนนโหวต</h2>
     <p id="results-sub">กำลังโหลด...</p>
+    <button id="refresh-results-btn" onclick="manualRefresh()" style="margin-top:10px;background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:20px;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Kanit',sans-serif">🔄 รีเฟรชผลโหวต</button>
   </div>
   <div class="result-item">
     <div class="result-name">🌴🏡 Option A · Bali in Loft + Modern Villa</div>
@@ -357,6 +359,13 @@ function setConnStatus(state, text) {
   txt.textContent = text;
 }
 
+function showErr(msg) {
+  const el = document.getElementById('err-banner');
+  el.style.display = 'block';
+  el.textContent = msg;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 function initFB() {
   try {
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
@@ -378,13 +387,32 @@ function initFB() {
       updateResults(snap.val() || {});
     }, err => {
       console.error('Firebase read error:', err);
-      setConnStatus('st-err', '❌ เชื่อมต่อไม่ได้ (' + err.code + ') — ต้องแก้ Firebase Rules');
+      setConnStatus('st-err', '❌ อ่านผลโหวตไม่ได้ (' + err.code + ')');
+      showErr('⚠️ อ่านผลโหวตไม่ได้: ' + err.code + ' — ต้องไปเปิดสิทธิ์อ่าน/เขียนใน Firebase Realtime Database → Rules ก่อน (ตั้ง ".read": true, ".write": true แล้วกด Publish)');
       fbReady = false;
     });
   } catch (e) {
     console.error('Firebase init error:', e);
     setConnStatus('st-err', '❌ เริ่มระบบโหวตไม่สำเร็จ: ' + e.message);
+    showErr('⚠️ เริ่มระบบโหวตไม่สำเร็จ: ' + e.message);
   }
+}
+
+function manualRefresh() {
+  const btn = document.getElementById('refresh-results-btn');
+  if (!votesRef) { showErr('⚠️ ระบบยังไม่เชื่อมต่อ Firebase เลย ลองโหลดหน้าใหม่'); return; }
+  btn.textContent = '⏳ กำลังโหลด...';
+  votesRef.once('value')
+    .then(snap => {
+      updateResults(snap.val() || {});
+      btn.textContent = '✅ อัปเดตแล้ว!';
+      setTimeout(() => { btn.textContent = '🔄 รีเฟรชผลโหวต'; }, 1500);
+    })
+    .catch(err => {
+      console.error('Manual refresh error:', err);
+      showErr('⚠️ รีเฟรชไม่สำเร็จ: ' + err.code + ' — ' + err.message);
+      btn.textContent = '🔄 รีเฟรชผลโหวต';
+    });
 }
 
 function goSlide(id, idx) {
@@ -434,8 +462,9 @@ function closeModal() { document.getElementById('confirm-modal').classList.remov
 function confirmVote() {
   const name = document.getElementById('voter-name').value.trim();
   if (!name || !pendingVote) return;
-  if (!votesRef) { alert('ระบบโหวตยังไม่พร้อม ลองรอสักครู่แล้วโหวตใหม่นะครับ 🙏'); return; }
+  if (!votesRef) { showErr('⚠️ ระบบโหวตยังไม่พร้อม รอสักครู่แล้วลองโหวตใหม่นะครับ'); return; }
   closeModal();
+  document.getElementById('err-banner').style.display = 'none';
 
   const key = name.toLowerCase().trim().replace(/\s+/g, '_').replace(/[.#$\[\]/]/g, '');
   const voteData = { name: name, option: pendingVote, ts: Date.now() };
@@ -447,10 +476,12 @@ function confirmVote() {
       document.getElementById('voted-banner').style.display = 'block';
       document.getElementById('voter-name').disabled = true;
       launchConfetti();
+      // Fallback: force a manual read in case the realtime listener is blocked
+      setTimeout(manualRefresh, 800);
     })
     .catch(err => {
       console.error('Vote write error:', err);
-      alert('บันทึกโหวตไม่สำเร็จ: ' + err.message + '\n\n(ต้องเปิดสิทธิ์เขียนข้อมูลใน Firebase Rules ก่อน)');
+      showErr('❌ บันทึกโหวตไม่สำเร็จ: ' + err.code + ' — ' + err.message + '\n\nสาเหตุที่พบบ่อยที่สุดคือ Firebase Rules ยังปิดสิทธิ์เขียนอยู่ ต้องไปตั้ง ".write": true ก่อนครับ');
     });
 }
 
