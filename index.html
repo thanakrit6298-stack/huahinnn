@@ -472,13 +472,14 @@ function closeModal() { document.getElementById('confirm-modal').classList.remov
 
 function confirmVote() {
   const name = document.getElementById('voter-name').value.trim();
-  if (!name || !pendingVote) return;
+  const opt = pendingVote;              // capture BEFORE closeModal() clears it
+  if (!name || !opt) return;
   if (!votesRef) { showErr('⚠️ ระบบโหวตยังไม่พร้อม รอสักครู่แล้วลองโหวตใหม่นะครับ'); return; }
   closeModal();
   document.getElementById('err-banner').style.display = 'none';
 
   const key = name.toLowerCase().trim().replace(/\s+/g, '_').replace(/[.#$\[\]/]/g, '');
-  const voteData = { name: name, option: pendingVote, ts: Date.now() };
+  const voteData = { name: name, option: opt, ts: Date.now() };
 
   votesRef.child(key || ('voter_' + Date.now())).set(voteData)
     .then(() => {
@@ -497,7 +498,8 @@ function confirmVote() {
 }
 
 function updateResults(data) {
-  const votes = Object.values(data);
+  // Defensive: ignore any legacy/corrupt records that don't have a valid option
+  const votes = Object.values(data).filter(v => v && OPT_META[v.option]);
   const ca = votes.filter(v => v.option==='a').length;
   const cb = votes.filter(v => v.option==='b').length;
   const cc = votes.filter(v => v.option==='c').length;
