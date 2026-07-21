@@ -19,6 +19,17 @@ html,body{width:100%;overflow-x:hidden;font-family:'Kanit',sans-serif;background
 .hero p{font-size:13px;color:rgba(255,255,255,.9);font-weight:400}
 .hero-tag{display:inline-block;background:rgba(255,255,255,.25);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:4px 14px;font-size:12px;color:#fff;font-weight:600;margin-top:10px}
 
+/* CONN STATUS */
+#conn-status{margin:10px 12px 0;border-radius:12px;padding:8px 14px;font-size:12px;font-weight:600;text-align:center;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .3s}
+#conn-status.st-loading{background:#FFF3CD;color:#856404}
+#conn-status.st-ok{background:#D4EDDA;color:#155724}
+#conn-status.st-err{background:#F8D7DA;color:#721C24}
+.conn-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.st-loading .conn-dot{background:#856404;animation:pulse 1s infinite}
+.st-ok .conn-dot{background:#155724}
+.st-err .conn-dot{background:#721C24}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
 /* FRIEND NOTE BANNER */
 .friend-note{margin:14px 12px 0;border-radius:20px;background:linear-gradient(135deg,#ffe0e6,#fff0e0);border:2px dashed #FFB3C6;padding:14px 18px;text-align:center}
 .friend-note .fn-emoji{font-size:28px;margin-bottom:4px;display:block}
@@ -145,6 +156,8 @@ footer{text-align:center;padding:24px 16px;font-size:12px;color:#CCC}
   <p>เลือกที่พักที่ใช่สำหรับพวกเรา<br>ดูรูป เปรียบราคา แล้วกดโหวตได้เลย</p>
   <span class="hero-tag">🗳️ ผลโหวตแบบ Real-time</span>
 </div>
+
+<div id="conn-status" class="st-loading"><span class="conn-dot"></span><span id="conn-status-text">กำลังเชื่อมต่อระบบโหวต...</span></div>
 
 <!-- FRIEND NOTE -->
 <div class="friend-note">
@@ -331,16 +344,47 @@ const FIREBASE_CONFIG = {
   projectId: "sparepartandshutdown",
   storageBucket: "sparepartandshutdown.firebasestorage.app",
   messagingSenderId: "621815110628",
-  appId: "1:621815110628:web:0bca332f1b1a097e2085f1"
+  appId: "1:621815110628:web:0bca332f1b1a097e2085f1",
+  measurementId: "G-10BLR80R0L"
 };
 
-let hasVoted = false, pendingVote = null, votesRef;
+let hasVoted = false, pendingVote = null, votesRef, fbReady = false;
+
+function setConnStatus(state, text) {
+  const el = document.getElementById('conn-status');
+  const txt = document.getElementById('conn-status-text');
+  el.className = state;
+  txt.textContent = text;
+}
 
 function initFB() {
-  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
-  const db = firebase.database();
-  votesRef = db.ref('trip_vote_huahin/votes');
-  votesRef.on('value', snap => updateResults(snap.val() || {}));
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    const db = firebase.database();
+    votesRef = db.ref('trip_vote_huahin/votes');
+
+    // Watch actual socket connection state
+    db.ref('.info/connected').on('value', snap => {
+      if (snap.val() === true) {
+        setConnStatus('st-ok', '✅ เชื่อมต่อระบบโหวตสำเร็จ — พร้อมโหวต!');
+        fbReady = true;
+      } else {
+        setConnStatus('st-loading', '⟳ กำลังเชื่อมต่อระบบโหวต...');
+      }
+    });
+
+    // Listen for vote data; surface permission errors instead of failing silently
+    votesRef.on('value', snap => {
+      updateResults(snap.val() || {});
+    }, err => {
+      console.error('Firebase read error:', err);
+      setConnStatus('st-err', '❌ เชื่อมต่อไม่ได้ (' + err.code + ') — ต้องแก้ Firebase Rules');
+      fbReady = false;
+    });
+  } catch (e) {
+    console.error('Firebase init error:', e);
+    setConnStatus('st-err', '❌ เริ่มระบบโหวตไม่สำเร็จ: ' + e.message);
+  }
 }
 
 function goSlide(id, idx) {
@@ -390,8 +434,13 @@ function closeModal() { document.getElementById('confirm-modal').classList.remov
 function confirmVote() {
   const name = document.getElementById('voter-name').value.trim();
   if (!name || !pendingVote) return;
+  if (!votesRef) { alert('ระบบโหวตยังไม่พร้อม ลองรอสักครู่แล้วโหวตใหม่นะครับ 🙏'); return; }
   closeModal();
-  votesRef.child(name.toLowerCase().replace(/\s+/g,'_')).set({ name, option: pendingVote, ts: Date.now() })
+
+  const key = name.toLowerCase().trim().replace(/\s+/g, '_').replace(/[.#$\[\]/]/g, '');
+  const voteData = { name: name, option: pendingVote, ts: Date.now() };
+
+  votesRef.child(key || ('voter_' + Date.now())).set(voteData)
     .then(() => {
       hasVoted = true;
       ['a','b','c'].forEach(o => document.getElementById('btn-' + o).disabled = true);
@@ -399,7 +448,10 @@ function confirmVote() {
       document.getElementById('voter-name').disabled = true;
       launchConfetti();
     })
-    .catch(err => alert('เกิดข้อผิดพลาด: ' + err.message));
+    .catch(err => {
+      console.error('Vote write error:', err);
+      alert('บันทึกโหวตไม่สำเร็จ: ' + err.message + '\n\n(ต้องเปิดสิทธิ์เขียนข้อมูลใน Firebase Rules ก่อน)');
+    });
 }
 
 function updateResults(data) {
