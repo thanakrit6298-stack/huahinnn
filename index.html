@@ -158,6 +158,7 @@ footer{text-align:center;padding:24px 16px;font-size:12px;color:#CCC}
 </div>
 
 <div id="conn-status" class="st-loading"><span class="conn-dot"></span><span id="conn-status-text">กำลังเชื่อมต่อระบบโหวต...</span></div>
+<div style="margin:8px 12px 0;text-align:center;font-size:11px;color:#AAA">💡 ถ้าเปิดผ่าน LINE แล้วผลโหวตไม่อัปเดต ลองกด ⋯ มุมขวาบน → "เปิดใน Safari/Chrome"</div>
 
 <!-- FRIEND NOTE -->
 <div class="friend-note">
@@ -391,6 +392,16 @@ function initFB() {
       showErr('⚠️ อ่านผลโหวตไม่ได้: ' + err.code + ' — ต้องไปเปิดสิทธิ์อ่าน/เขียนใน Firebase Realtime Database → Rules ก่อน (ตั้ง ".read": true, ".write": true แล้วกด Publish)');
       fbReady = false;
     });
+
+    // POLLING FALLBACK: some in-app browsers (e.g. LINE) restrict/drop WebSocket
+    // push updates after the initial connection. Poll every 3s as a safety net
+    // so results still refresh even if the realtime listener goes stale.
+    setInterval(() => {
+      if (!votesRef) return;
+      votesRef.once('value')
+        .then(snap => updateResults(snap.val() || {}))
+        .catch(err => console.warn('Poll refresh failed:', err.code));
+    }, 3000);
   } catch (e) {
     console.error('Firebase init error:', e);
     setConnStatus('st-err', '❌ เริ่มระบบโหวตไม่สำเร็จ: ' + e.message);
